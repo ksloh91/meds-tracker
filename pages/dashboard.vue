@@ -188,6 +188,11 @@ const handleDeleteMedication = async (medicationId: string) => {
 };
 
 const handleSignOut = async () => {
-  await signOut($auth);
+  try {
+    await signOut($auth);
+    navigateTo('/');
+  } catch (error) {
+    console.error('Error signing out:', error);
+  }
 };
 </script> 

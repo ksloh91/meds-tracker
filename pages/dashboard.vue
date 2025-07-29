@@ -25,7 +25,7 @@
             <!-- Container for Edit/Delete buttons -->
             <div class="flex gap-2">
               <button @click="openEditModal(med)" class="btn btn-xs btn-outline btn-info">Edit</button>
-              <button @click="handleDelete(med.id)" class="btn btn-xs btn-error btn-outline">Delete</button>
+              <button @click="handleDeleteMedication(med.id)" class="btn btn-xs btn-error btn-outline">Delete</button>
             </div>
           </div>
         </div>
@@ -182,7 +182,7 @@ onUnmounted(() => {
   if (unsubscribe) unsubscribe();
 });
 
-const handleDelete = async (medicationId: string) => {
+const handleDeleteMedication = async (medicationId: string) => {
   const medRef = doc($firestore, 'medications', medicationId);
   await deleteDoc(medRef);
 };

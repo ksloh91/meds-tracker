@@ -3,7 +3,6 @@
     <div class="max-w-4xl mx-auto">
       <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold">Your Medications</h1>
-        <!-- Changed to call a function -->
         <button class="btn btn-primary" @click="openAddModal">
           Add Medication
         </button>
@@ -22,7 +21,6 @@
                 </div>
               </div>
             </div>
-            <!-- Container for Edit/Delete buttons -->
             <div class="flex gap-2">
               <button @click="openEditModal(med)" class="btn btn-xs btn-outline btn-info">Edit</button>
               <button @click="handleDeleteMedication(med.id)" class="btn btn-xs btn-error btn-outline">Delete</button>
@@ -40,30 +38,22 @@
     <!-- Reusable Add/Edit Modal -->
     <dialog id="med_modal" class="modal">
       <div class="modal-box">
-        <!-- Dynamic Title -->
         <h3 class="font-bold text-lg mb-4">{{ editingMedId ? 'Edit' : 'Add a New' }} Medication</h3>
-        <!-- Changed submit handler -->
         <form @submit.prevent="handleSaveMedication">
-          <!-- Name Input -->
+          <!-- Form fields... -->
           <div class="form-control">
             <label class="label"><span class="label-text">Medication Name</span></label>
             <input v-model="medName" type="text" placeholder="e.g., Paracetamol" class="input input-bordered" required />
           </div>
-
-          <!-- Dosage and Unit Inputs -->
           <div class="form-control mt-4">
             <label class="label"><span class="label-text">Dosage</span></label>
             <div class="flex gap-2">
               <input v-model="medDosage" type="number" placeholder="e.g., 1" class="input input-bordered w-1/2" required />
               <select v-model="medUnit" class="select select-bordered w-1/2">
-                <option v-for="unitOption in unitOptions" :key="unitOption" :value="unitOption">
-                  {{ unitOption }}
-                </option>
+                <option v-for="unitOption in unitOptions" :key="unitOption" :value="unitOption">{{ unitOption }}</option>
               </select>
             </div>
           </div>
-
-          <!-- Schedule Times Input -->
           <div class="form-control mt-4">
             <label class="label"><span class="label-text">Schedule Times</span></label>
             <div v-for="(time, index) in newMedSchedule" :key="index" class="flex items-center gap-2 mb-2">
@@ -72,7 +62,6 @@
             </div>
             <button @click="addTime" type="button" class="btn btn-sm btn-block btn-ghost mt-2">Add Time</button>
           </div>
-
           <div class="modal-action">
             <button type="submit" class="btn btn-primary">Save</button>
             <button type="button" class="btn" onclick="med_modal.close()">Close</button>
@@ -88,13 +77,14 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { signOut } from 'firebase/auth';
 import { collection, addDoc, query, where, onSnapshot, type Unsubscribe, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Medication } from '~/types';
+import { useNotifications } from '~/composables/useNotifications';
 
 const { $auth, $firestore } = useNuxtApp();
+const { scheduleMedicationReminders, cancelMedicationReminders, requestPermissions, createNotificationChannel } = useNotifications();
 const medications = ref<Medication[]>([]);
 let unsubscribe: Unsubscribe | null = null;
 
-// --- State for the modal ---
-const editingMedId = ref<string | null>(null); // To track if we are editing
+const editingMedId = ref<string | null>(null);
 const medName = ref('');
 const medDosage = ref('');
 const unitOptions = ['tablet(s)', 'capsule(s)', 'mg', 'ml', 'packet(s)', 'tablespoon(s)', 'teaspoon(s)', 'spray(s)', 'drop(s)'];
@@ -103,7 +93,6 @@ const newMedSchedule = ref(['08:00']);
 
 const getModal = () => document.getElementById('med_modal') as HTMLDialogElement | null;
 
-// --- Modal and Form Functions ---
 const resetForm = () => {
   editingMedId.value = null;
   medName.value = '';
@@ -117,7 +106,6 @@ const addTime = () => {
 };
 
 const removeTime = (index: number) => {
-  // Prevent removing the last item
   if (newMedSchedule.value.length > 1) {
     newMedSchedule.value.splice(index, 1);
   }
@@ -133,7 +121,7 @@ const openEditModal = (med: Medication) => {
   medName.value = med.name;
   medDosage.value = med.dosage;
   medUnit.value = med.unit;
-  newMedSchedule.value = [...med.schedule]; // Create a copy
+  newMedSchedule.value = [...med.schedule];
   getModal()?.showModal();
 };
 
@@ -149,21 +137,32 @@ const handleSaveMedication = async () => {
     userId: currentUser.uid,
   };
 
+  let savedMedId = editingMedId.value;
+
   if (editingMedId.value) {
-    // Update existing medication
-    const medRef = doc($firestore, 'medications', editingMedId.value);
-    await updateDoc(medRef, medData);
+    await updateDoc(doc($firestore, 'medications', editingMedId.value), medData);
   } else {
-    // Add new medication
-    await addDoc(collection($firestore, 'medications'), medData);
+    const docRef = await addDoc(collection($firestore, 'medications'), medData);
+    savedMedId = docRef.id;
+  }
+
+  if (savedMedId) {
+    const medicationToSchedule: Medication = {
+      id: savedMedId,
+      ...medData
+    };
+    await scheduleMedicationReminders(medicationToSchedule);
   }
 
   getModal()?.close();
   resetForm();
 };
 
-// --- Firestore and Auth Functions ---
-onMounted(() => {
+onMounted(async () => {
+  // On app load, create the required notification channel and ask for permissions
+  await createNotificationChannel();
+  await requestPermissions();
+
   const currentUser = $auth.currentUser;
   if (!currentUser) return;
 
@@ -183,8 +182,8 @@ onUnmounted(() => {
 });
 
 const handleDeleteMedication = async (medicationId: string) => {
-  const medRef = doc($firestore, 'medications', medicationId);
-  await deleteDoc(medRef);
+  await cancelMedicationReminders(medicationId);
+  await deleteDoc(doc($firestore, 'medications', medicationId));
 };
 
 const handleSignOut = async () => {

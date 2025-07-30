@@ -7,9 +7,15 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "capacitor:sync": "npm run build && npx cap sync"
   },
   "dependencies": {
+    "@capacitor/android": "latest",
+    "@capacitor/cli": "latest",
+    "@capacitor/core": "latest",
+    "@capacitor/local-notifications": "latest",
+    "@capacitor/toast": "^7.0.1",
     "@pinia/nuxt": "^0.11.2",
     "firebase": "^12.0.0",
     "nuxt": "^4.0.1",

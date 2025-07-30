@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">meds-tracker-mimo</string>
+    <string name="title_activity_main">meds-tracker-mimo</string>
+    <string name="package_name">com.mimo.medstracker</string>
+    <string name="custom_url_scheme">com.mimo.medstracker</string>
+</resources>

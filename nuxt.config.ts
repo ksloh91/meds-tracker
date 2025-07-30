@@ -1,10 +1,17 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   devtools: { enabled: true },
+  
+  // This block forces a static export
+  nitro: {
+    preset: 'static'
+  },
+
   modules: [
     "@nuxtjs/tailwindcss",
     "@pinia/nuxt"
   ],
+
   runtimeConfig: {
     public: {
       firebaseApiKey: process.env.NUXT_PUBLIC_FIREBASE_API_KEY,

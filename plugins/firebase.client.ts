@@ -1,9 +1,9 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getAuth, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { useAuthStore } from "~/stores/auth";
 
-export default defineNuxtPlugin((nuxtApp) => {
+export default defineNuxtPlugin(async (nuxtApp) => {
   const config = useRuntimeConfig();
 
   const firebaseConfig = {
@@ -16,13 +16,13 @@ export default defineNuxtPlugin((nuxtApp) => {
   };
 
   const app = initializeApp(firebaseConfig);
-
   const auth = getAuth(app);
   const firestore = getFirestore(app);
   const authStore = useAuthStore();
 
-  // This is the core of our auth system. It updates the Pinia store
-  // whenever the user's authentication state changes.
+  // Set persistence to local
+  await setPersistence(auth, browserLocalPersistence);
+
   onAuthStateChanged(auth, (user) => {
     authStore.setAuth(user);
   });

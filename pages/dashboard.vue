@@ -26,13 +26,28 @@
               <div v-for="med in group.meds" :key="med.medication.id" @click="openDetailModal(med, group.time)" class="flex justify-between items-center p-2 rounded-lg hover:bg-base-200 cursor-pointer">
                 <div>
                   <p class="font-bold">{{ med.medication.name }}</p>
-                  <p class="text-sm text-gray-500">{{ med.medication.dosage }} {{ med.medication.unit }}</p>
+                  <p class="text-sm text-gray-500">{{ med.medication.dosage }} {{ med.medication.unit }}<span class="ml-2">💊</span></p>
                 </div>
                 <div class="flex gap-2 items-center">
-                  <p v-if="med.status === 'taken'" class="text-sm text-green-500">Taken at: {{ formatTime(med.actionAt) }}</p>
-                  <p v-else-if="med.status === 'skipped'" class="text-sm text-yellow-500">Skipped at: {{ formatTime(med.actionAt) }}</p>
+                  <p v-if="med.status === 'taken'" class="text-sm text-green-500">
+                    Taken at 
+                    {{
+                      (() => {
+                        const date = new Date(med.dose.actionAt);
+                        let hour = date.getHours();
+                        let minute = date.getMinutes();
+                        const ampm = hour >= 12 ? 'pm' : 'am';
+                        // Convert 24-hour time to 12-hour format; if hour is 0, set to 12
+                        hour = hour % 12 === 0 ? 12 : hour % 12;
+                        const minuteStr = minute.toString().padStart(2, '0');
+                        const day = date.toLocaleDateString([], { month: 'long', day: 'numeric' });
+                        return `${hour}:${minuteStr} ${ampm}, ${day}`;
+                      })()
+                    }}
+                  </p>
+                  <p v-else-if="med.status === 'skipped'" class="text-sm text-yellow-500">Skipped At ({{ new Date(med.dose.actionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) }})</p>
                   <p v-else-if="med.status === 'missed'" class="text-sm text-red-500">Missed</p>
-                  <p v-else class="text-sm text-blue-500">Pending</p>
+                  <button v-else @click.stop="handleDoseAction(med, group.time, 'taken')" class="btn btn-xs btn-success">Take</button>
                 </div>
               </div>
             </div>
@@ -162,28 +177,15 @@ const isPast = (time: string) => {
   return now > scheduleTime;
 };
 
-const formatTime = (date: Date | null) => {
-  if (!date) return '';
-  return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-};
-
-const todaysDoses = computed(() => {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return doses.value.filter(d => {
-    const actionAt = new Date(d.actionAt);
-    return actionAt >= startOfDay && actionAt < endOfDay;
-  });
-});
-
 const todaysMedications = computed(() => {
+  if (!medications.value || medications.value.length === 0) {
+    return [];
+  }
   const todaySchedules: { time: string; meds: ScheduleItem[] }[] = [];
-  const now = currentTime.value;
 
   medications.value.forEach(med => {
     med.schedule.forEach(time => {
-      const dose = todaysDoses.value.find(d => d.medicationId === med.id && d.scheduledTime === time);
+      const dose = doses.value.find(d => d.medicationId === med.id && d.scheduledTime === time);
       
       let status: ScheduleStatus = 'pending';
       if (dose) {
@@ -221,7 +223,25 @@ const closeDetailModal = () => {
 
 const handleUnTake = async (doseId: string) => {
   if (!doseId) return;
-  await deleteDoc(doc($firestore, 'doses', doseId));
+
+  try {
+    const doseRef = doc($firestore, 'doses', doseId);
+    await updateDoc(doseRef, {
+      status: 'missed',
+      actionAt: null 
+    });
+    await Toast.show({
+      text: `Dose status updated to missed.`,
+      duration: 'short'
+    });
+  } catch (error) {
+    console.error('Error un-taking dose:', error);
+    await Toast.show({
+      text: `Error updating dose.`,
+      duration: 'short'
+    });
+  }
+
   closeDetailModal();
 };
 
@@ -229,7 +249,9 @@ const handleDoseAction = async (item: ScheduleItem | null, time: string | undefi
   const currentUser = $auth.currentUser;
   if (!currentUser || !item || !time) return;
 
-  const dose: Dose = {
+  const existingDose = item.dose;
+
+  const doseData = {
     medicationId: item.medication.id,
     medicationName: item.medication.name,
     userId: currentUser.uid,
@@ -239,7 +261,13 @@ const handleDoseAction = async (item: ScheduleItem | null, time: string | undefi
   };
 
   try {
-    await addDoc(collection($firestore, 'doses'), dose);
+    if (existingDose) {
+      // If a dose record exists, update it
+      await updateDoc(doc($firestore, 'doses', existingDose.id), doseData);
+    } else {
+      // Otherwise, create a new one
+      await addDoc(collection($firestore, 'doses'), doseData);
+    }
     await Toast.show({
       text: `${item.medication.name} dose ${status}!`,
       duration: 'short'
@@ -339,11 +367,7 @@ onMounted(async () => {
     } as Medication));
   });
 
-  // Fetch today's doses
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
+  // Fetch all doses for the user
   const doseCollection = collection($firestore, 'doses');
   const doseQuery = query(doseCollection, where('userId', '==', currentUser.uid));
   dosesUnsubscribe = onSnapshot(doseQuery, (querySnapshot) => {
@@ -352,7 +376,7 @@ onMounted(async () => {
       return {
         id: doc.id,
         ...data,
-        actionAt: data.actionAt.toDate(),
+        actionAt: data.actionAt ? data.actionAt.toDate() : null,
       } as Dose;
     });
   });

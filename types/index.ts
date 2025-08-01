@@ -11,8 +11,8 @@ export interface Dose {
   id?: string;
   medicationId: string;
   userId: string;
-  actionAt: Date; // Timestamp for when the action was taken
+  actionAt?: Date; // Timestamp for when the action was taken, now optional
   scheduledTime: string;
   medicationName?: string;
-  status: 'taken' | 'skipped'; // New status field
+  status: 'taken' | 'skipped' | 'missed'; // 'missed' is now a persistent status
 }

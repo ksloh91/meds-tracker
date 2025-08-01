@@ -21,13 +21,19 @@
       </div>
 
       <div class="modal-action justify-center mt-6 grid grid-cols-3 gap-2">
-        <template v-if="!item.dose">
-          <button @click="$emit('skip', item)" class="btn btn-ghost">Skip</button>
-          <button @click="$emit('take', item)" class="btn btn-primary">Take</button>
+        <template v-if="item.status === 'pending' || item.status === 'missed'">
+          <button @click="$emit('skip', item, item.time)" class="btn btn-ghost">Skip</button>
+          <button @click="$emit('take', item, item.time)" class="btn btn-primary">Take</button>
           <button @click="$emit('reschedule', item)" class="btn btn-ghost">Reschedule</button>
         </template>
-        <template v-else>
+        <template v-else-if="item.status === 'taken'">
           <button @click="$emit('un-take', item.dose.id)" class="btn btn-primary col-span-3">Un-take</button>
+        </template>
+        <template v-else-if="item.status === 'skipped'">
+          <div></div>
+          <button @click="$emit('take', item, item.time)" class="btn btn-primary col-start-2">Take</button>
+          <div></div>
+          <!-- <button @click="$emit('un-take', item.dose.id)" class="btn btn-ghost col-span-2">Un-skip</button> -->
         </template>
       </div>
 
@@ -60,7 +66,9 @@ const modalId = 'medication_detail_modal';
 const formattedActionAt = computed(() => {
   if (!props.item?.dose?.actionAt) return '';
   const date = new Date(props.item.dose.actionAt);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${time}, ${dateStr}`;
 });
 
 const formattedScheduledDate = computed(() => {

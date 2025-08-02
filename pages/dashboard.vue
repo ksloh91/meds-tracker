@@ -13,48 +13,41 @@
 
       <!-- Tabs -->
       <div role="tablist" class="tabs tabs-boxed mb-6">
-        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'today' }" @click="activeTab = 'today'">Today</a>
+        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'today' }" @click="activeTab = 'today'">Schedule</a>
         <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'all' }" @click="activeTab = 'all'">All Medications</a>
       </div>
 
-      <!-- Today's Medication List -->
-      <div v-if="activeTab === 'today'" class="bg-base-100 p-4 rounded-box shadow">
-        <div v-if="todaysMedications.length > 0" class="space-y-4">
-          <div v-for="group in todaysMedications" :key="group.time">
-            <h2 class="text-xl font-bold mb-2">{{ group.time }}</h2>
-            <div class="space-y-2">
-              <div v-for="med in group.meds" :key="med.medication.id" @click="openDetailModal(med, group.time)" class="flex justify-between items-center p-2 rounded-lg hover:bg-base-200 cursor-pointer">
-                <div>
-                  <p class="font-bold">{{ med.medication.name }}</p>
-                  <p class="text-sm text-gray-500">{{ med.medication.dosage }} {{ med.medication.unit }}<span class="ml-2">💊</span></p>
-                </div>
-                <div class="flex gap-2 items-center">
-                  <p v-if="med.status === 'taken'" class="text-sm text-green-500">
-                    Taken at 
-                    {{
-                      (() => {
-                        const date = new Date(med.dose.actionAt);
-                        let hour = date.getHours();
-                        let minute = date.getMinutes();
-                        const ampm = hour >= 12 ? 'pm' : 'am';
-                        // Convert 24-hour time to 12-hour format; if hour is 0, set to 12
-                        hour = hour % 12 === 0 ? 12 : hour % 12;
-                        const minuteStr = minute.toString().padStart(2, '0');
-                        const day = date.toLocaleDateString([], { month: 'long', day: 'numeric' });
-                        return `${hour}:${minuteStr} ${ampm}, ${day}`;
-                      })()
-                    }}
-                  </p>
-                  <p v-else-if="med.status === 'skipped'" class="text-sm text-yellow-500">Skipped At ({{ new Date(med.dose.actionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) }})</p>
-                  <p v-else-if="med.status === 'missed'" class="text-sm text-red-500">Missed</p>
-                  <button v-else @click.stop="handleDoseAction(med, group.time, 'taken')" class="btn btn-xs btn-success">Take</button>
+      <!-- Schedule View -->
+      <div v-if="activeTab === 'today'">
+        <DateNavigator v-model="selectedDate" />
+        <div class="bg-base-100 p-4 rounded-box shadow">
+          <div v-if="medicationsForSelectedDay.length > 0" class="space-y-4">
+            <div v-for="group in medicationsForSelectedDay" :key="group.time">
+              <h2 class="text-xl font-bold mb-2">{{ group.time }}</h2>
+              <div class="space-y-2">
+                <div v-for="med in group.meds" :key="med.medication.id" @click="openDetailModal(med, group.time)" class="flex justify-between items-center p-2 rounded-lg hover:bg-base-200 cursor-pointer">
+                  <div>
+                    <p class="font-bold">{{ med.medication.name }}</p>
+                    <p class="text-sm text-gray-500">{{ med.medication.dosage }} {{ med.medication.unit }}</p>
+                  </div>
+                  <div class="flex gap-2 items-center">
+                    <p v-if="med.status === 'taken' && med.dose?.actionAt" class="text-sm text-green-500">
+                      Taken at {{ new Date(med.dose.actionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) }}
+                    </p>
+                    <p v-else-if="med.status === 'skipped' && med.dose?.actionAt" class="text-sm text-yellow-500">
+                      Skipped at {{ new Date(med.dose.actionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) }}
+                    </p>
+                    <p v-else-if="med.status === 'missed'" class="text-sm text-red-500">Missed</p>
+                    <button v-else-if="med.status === 'pending'" @click.stop="handleDoseAction(med, group.time, 'taken')" class="btn btn-xs btn-success">Take</button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+          <p v-else class="text-gray-500">You have no medications scheduled for {{ selectedDate.toLocaleDateString() }}.</p>
         </div>
-        <p v-else class="text-gray-500">You have no medications scheduled for today.</p>
       </div>
+
 
       <!-- All Medications List -->
       <div v-if="activeTab === 'all'" class="bg-base-100 p-4 rounded-box shadow">
@@ -120,7 +113,7 @@
 
     <MedicationDetailModal 
       :item="selectedMed" 
-      :is-past="isPast(selectedMed?.time || '')"
+      :is-past="isPast(selectedMed?.time || '', selectedDate)"
       @close="closeDetailModal" 
       @un-take="handleUnTake"
       @take="handleDoseAction(selectedMed, selectedMed.time, 'taken')"
@@ -133,12 +126,15 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { signOut } from 'firebase/auth';
 import { collection, addDoc, query, where, onSnapshot, type Unsubscribe, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 import type { Medication, Dose } from '~/types';
 import { useNotifications } from '~/composables/useNotifications';
 import { Toast } from '@capacitor/toast';
 import MedicationDetailModal from '~/components/MedicationDetailModal.vue';
+import DateNavigator from '~/components/DateNavigator.vue';
 
 type ScheduleStatus = 'taken' | 'skipped' | 'missed' | 'pending';
+
 interface ScheduleItem {
   medication: Medication;
   dose: Dose | null;
@@ -148,7 +144,7 @@ interface ScheduleItem {
 }
 
 const { $auth, $firestore } = useNuxtApp();
-const { scheduleMedicationReminders, cancelMedicationReminders, requestPermissions } = useNotifications();
+const { scheduleMedicationReminders, cancelMedicationReminders, requestPermissions, registerActionTypes, addNotificationListeners } = useNotifications();
 const medications = ref<Medication[]>([]);
 const doses = ref<Dose[]>([]);
 let medsUnsubscribe: Unsubscribe | null = null;
@@ -157,6 +153,7 @@ let timeInterval: any = null;
 
 const activeTab = ref('today');
 const currentTime = ref(new Date());
+const selectedDate = ref(new Date());
 
 const selectedMed = ref<ScheduleItem | null>(null);
 
@@ -169,35 +166,49 @@ const newMedSchedule = ref(['08:00']);
 
 const getModal = (id: string) => document.getElementById(id) as HTMLDialogElement | null;
 
-const isPast = (time: string) => {
+const isPast = (time: string, date: Date) => {
   if (!time) return false;
   const now = currentTime.value;
   const [hours, minutes] = time.split(':').map(Number);
-  const scheduleTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+  const scheduleTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes);
   return now > scheduleTime;
 };
 
-const todaysMedications = computed(() => {
-  if (!medications.value || medications.value.length === 0) {
+const medicationsForSelectedDay = computed(() => {
+  if (!medications.value) {
     return [];
   }
-  const todaySchedules: { time: string; meds: ScheduleItem[] }[] = [];
+
+  const schedules: { time: string; meds: ScheduleItem[] }[] = [];
 
   medications.value.forEach(med => {
     med.schedule.forEach(time => {
-      const dose = doses.value.find(d => d.medicationId === med.id && d.scheduledTime === time);
-      
+      // Find a dose that matches the medication, scheduled time, AND the selected date
+      const dose = doses.value.find(d => {
+        if (d.medicationId !== med.id || d.scheduledTime !== time) {
+          return false;
+        }
+        // An actionAt timestamp must exist to check the date
+        if (!d.actionAt) {
+          return false; // A 'missed' status from 'un-take' won't have an actionAt
+        }
+        const actionDate = new Date(d.actionAt);
+        return actionDate.toDateString() === selectedDate.value.toDateString();
+      });
+
       let status: ScheduleStatus = 'pending';
+      const isPastTime = isPast(time, selectedDate.value);
+
       if (dose) {
         status = dose.status;
-      } else if (isPast(time)) {
+      } else if (isPastTime) {
         status = 'missed';
       }
 
-      let group = todaySchedules.find(g => g.time === time);
+      let group = schedules.find(g => g.time === time);
       if (!group) {
         group = { time, meds: [] };
-        todaySchedules.push(group);
+        schedules.push(group);
       }
       group.meds.push({ 
         medication: med, 
@@ -209,8 +220,9 @@ const todaysMedications = computed(() => {
     });
   });
 
-  return todaySchedules.sort((a, b) => a.time.localeCompare(b.time));
+  return schedules.sort((a, b) => a.time.localeCompare(b.time));
 });
+
 
 const openDetailModal = (med: ScheduleItem, time: string) => {
   selectedMed.value = { ...med, time };
@@ -246,41 +258,68 @@ const handleUnTake = async (doseId: string) => {
 };
 
 const handleDoseAction = async (item: ScheduleItem | null, time: string | undefined, status: 'taken' | 'skipped') => {
+  // Step 1: Basic validation - ensure we have a user, a medication item, and a time.
   const currentUser = $auth.currentUser;
   if (!currentUser || !item || !time) return;
 
-  const existingDose = item.dose;
+  // Step 2: Define the time window for the selected day (from midnight to just before midnight).
+  // This is crucial for finding a dose that happened only on this specific day.
+  const startOfDay = new Date(selectedDate.value);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(selectedDate.value);
+  endOfDay.setHours(23, 59, 59, 999);
 
+  // Step 3: Search the local `doses` array to see if an action has already been recorded
+  // for this medication, at this time, on the selected day.
+  const existingDoseForDay = doses.value.find(d => 
+    d.medicationId === item.medication.id && // Must be the same medication
+    d.scheduledTime === time &&               // Must be for the same scheduled time
+    d.actionAt &&                             // The dose must have an action timestamp
+    d.actionAt >= startOfDay &&               // The action must have occurred on or after the start of the day
+    d.actionAt <= endOfDay                    // The action must have occurred before the end of the day
+  );
+
+  // Step 4: Prepare a clean data object for Firestore.
+  // This object represents the action the user just took.
   const doseData = {
     medicationId: item.medication.id,
     medicationName: item.medication.name,
     userId: currentUser.uid,
-    actionAt: new Date(),
+    actionAt: new Date(),       // Set a fresh timestamp for this action.
     scheduledTime: time,
-    status: status,
+    status: status,             // The new status ('taken' or 'skipped').
   };
 
   try {
-    if (existingDose) {
-      // If a dose record exists, update it
-      await updateDoc(doc($firestore, 'doses', existingDose.id), doseData);
+    // Step 5: Decide whether to update an existing record or create a new one.
+    if (existingDoseForDay) {
+      // If we found a dose for today, update it with the new data.
+      // This is useful for changing a 'skipped' status to 'taken'.
+      await updateDoc(doc($firestore, 'doses', existingDoseForDay.id!), doseData);
     } else {
-      // Otherwise, create a new one
+      // If no dose was found for today, create a new document in the 'doses' collection.
+      // This is the most common path.
       await addDoc(collection($firestore, 'doses'), doseData);
     }
+
+    // Step 6: Provide user feedback.
     await Toast.show({
       text: `${item.medication.name} dose ${status}!`,
       duration: 'short'
     });
   } catch (error) {
+    // If anything goes wrong, log the error and notify the user.
     console.error(`Error recording dose as ${status}:`, error);
     await Toast.show({
       text: `Error recording dose as ${status}.`,
       duration: 'short'
     });
   }
+  
+  // Step 7: Close the detail modal after the action is complete.
   closeDetailModal();
 };
+
 
 const resetForm = () => {
   editingMedId.value = null;
@@ -348,7 +387,11 @@ const handleSaveMedication = async () => {
 };
 
 onMounted(async () => {
-  await requestPermissions();
+  if (Capacitor.isNativePlatform()) {
+    await requestPermissions();
+    await registerActionTypes();
+    await addNotificationListeners();
+  }
 
   timeInterval = setInterval(() => {
     currentTime.value = new Date();
@@ -377,7 +420,7 @@ onMounted(async () => {
         id: doc.id,
         ...data,
         actionAt: data.actionAt ? data.actionAt.toDate() : null,
-      } as Dose;
+      } as unknown as Dose;
     });
   });
 });
